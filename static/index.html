@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MT Voice</title>
+
+    <script src="https://cdn.jsdelivr.net/npm/livekit-client/dist/livekit-client.umd.min.js"></script>
+
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: #111;
+            color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        .box {
+            width: 90%;
+            max-width: 450px;
+            background: #1b1b1b;
+            padding: 25px;
+            border-radius: 15px;
+            text-align: center;
+        }
+
+        input, button {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 12px;
+            margin-top: 10px;
+            border-radius: 8px;
+            border: none;
+        }
+
+        button {
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        #status {
+            margin-top: 15px;
+        }
+    </style>
+</head>
+
+<body>
+
+<div class="box">
+    <h1>MT Voice</h1>
+
+    <input
+        id="userId"
+        type="text"
+        placeholder="اكتب Roblox User ID"
+    >
+
+    <button onclick="connectVoice()">
+        🎙️ دخول الصوت
+    </button>
+
+    <button onclick="disconnectVoice()">
+        🔴 خروج
+    </button>
+
+    <div id="status">
+        غير متصل
+    </div>
+</div>
+
+<script>
+    let room = null;
+
+    async function connectVoice() {
+        const userId = document.getElementById("userId").value.trim();
+        const status = document.getElementById("status");
+
+        if (!userId) {
+            status.textContent = "اكتب Roblox User ID أول";
+            return;
+        }
+
+        try {
+            status.textContent = "جاري الاتصال...";
+
+            const response = await fetch(
+                `/voice/token?user_id=${encodeURIComponent(userId)}`
+            );
+
+            if (!response.ok) {
+                throw new Error("فشل الحصول على التوكن");
+            }
+
+            const data = await response.json();
+
+            room = new LivekitClient.Room();
+
+            room.on(
+                LivekitClient.RoomEvent.TrackSubscribed,
+                (track) => {
+                    if (track.kind === "audio") {
+                        const element = track.attach();
+                        document.body.appendChild(element);
+                    }
+                }
+            );
+
+            await room.connect(data.url, data.token);
+
+            await room.localParticipant.setMicrophoneEnabled(true);
+
+            status.textContent = "🟢 متصل بالصوت";
+        } catch (error) {
+            console.error(error);
+            status.textContent = "❌ صار خطأ بالاتصال";
+        }
+    }
+
+    async function disconnectVoice() {
+        if (room) {
+            await room.disconnect();
+            room = null;
+        }
+
+        document.getElementById("status").textContent = "🔴 غير متصل";
+    }
+</script>
+
+</body>
+</html>
