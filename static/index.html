@@ -1,91 +1,165 @@
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
+
 <head>
+
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
 
     <title>MT Voice</title>
 
     <script src="https://cdn.jsdelivr.net/npm/livekit-client/dist/livekit-client.umd.min.js"></script>
 
     <style>
+
+        * {
+            box-sizing: border-box;
+        }
+
         body {
+
             margin: 0;
+
             font-family: Arial, sans-serif;
+
             background: #111;
+
             color: white;
+
             display: flex;
+
             justify-content: center;
+
             align-items: center;
+
             min-height: 100vh;
         }
 
         .box {
+
             width: 90%;
+
             max-width: 450px;
+
             background: #1b1b1b;
+
             padding: 25px;
+
             border-radius: 15px;
+
             text-align: center;
         }
 
         h1 {
+
             margin-bottom: 20px;
         }
 
         input,
         button {
+
             width: 100%;
-            box-sizing: border-box;
+
             padding: 12px;
+
             margin-top: 10px;
+
             border-radius: 8px;
+
             border: none;
         }
 
         input {
+
             background: #2a2a2a;
+
             color: white;
+
             outline: none;
         }
 
         button {
+
             cursor: pointer;
+
             font-weight: bold;
         }
 
         #verifyBox {
+
             display: none;
         }
 
         #status {
+
             margin-top: 15px;
+
             line-height: 1.6;
         }
 
         #timer {
+
             margin-top: 10px;
+
             color: #aaa;
         }
 
         #code {
+
             text-align: center;
+
             direction: ltr;
+
             font-size: 22px;
+
             letter-spacing: 3px;
         }
+
+        #voiceInfo {
+
+            display: none;
+
+            margin-top: 15px;
+
+            padding: 12px;
+
+            border-radius: 10px;
+
+            background: #242424;
+
+            font-size: 14px;
+
+            line-height: 1.7;
+        }
+
+        .online {
+
+            color: #4ade80;
+        }
+
+        .offline {
+
+            color: #f87171;
+        }
+
     </style>
+
 </head>
 
+
 <body>
+
 
 <div class="box">
 
     <h1>MT Voice</h1>
 
-    <!-- ============================= -->
+
     <!-- USERNAME -->
-    <!-- ============================= -->
 
     <div id="usernameBox">
 
@@ -103,9 +177,7 @@
     </div>
 
 
-    <!-- ============================= -->
     <!-- VERIFICATION -->
-    <!-- ============================= -->
 
     <div id="verifyBox">
 
@@ -136,9 +208,7 @@
     </div>
 
 
-    <!-- ============================= -->
     <!-- VOICE -->
-    <!-- ============================= -->
 
     <button
         id="voiceButton"
@@ -148,6 +218,7 @@
         🎙️ دخول الصوت
     </button>
 
+
     <button
         id="disconnectButton"
         onclick="disconnectVoice()"
@@ -155,6 +226,25 @@
     >
         🔴 خروج من الصوت
     </button>
+
+
+    <div id="voiceInfo">
+
+        <div>
+            📡 نظام الصوت: <span class="online">
+                Proximity Voice
+            </span>
+        </div>
+
+        <div>
+            📏 مدى الصوت: 80 Stud
+        </div>
+
+        <div>
+            🔊 الصوت ينخفض كلما ابتعدت
+        </div>
+
+    </div>
 
 
     <div id="status">
@@ -166,26 +256,46 @@
 
 <script>
 
+    // =====================================================
+    // VARIABLES
+    // =====================================================
+
     let room = null;
 
     let verifiedUserId = null;
 
     let timerInterval = null;
 
+    let positionInterval = null;
+
     let secondsLeft = 600;
+
+    let maxVoiceDistance = 80;
+
+    let fullVolumeDistance = 5;
+
+    let ownPosition = null;
+
+
+    // كل عناصر الصوت الخاصة باللاعبين
+    const remoteAudio = new Map();
 
 
     // =====================================================
-    // REQUEST VERIFICATION CODE
+    // REQUEST CODE
     // =====================================================
 
     async function requestCode() {
 
         const username =
-            document.getElementById("username").value.trim();
+            document
+                .getElementById("username")
+                .value
+                .trim();
 
         const status =
             document.getElementById("status");
+
 
         if (!username) {
 
@@ -202,29 +312,34 @@
                 "🔎 جاري التحقق من الحساب...";
 
 
-            const response = await fetch(
-                "/auth/request",
-                {
-                    method: "POST",
+            const response =
+                await fetch(
+                    "/auth/request",
+                    {
 
-                    headers: {
-                        "Content-Type": "application/json"
-                    },
+                        method: "POST",
 
-                    body: JSON.stringify({
-                        username: username
-                    })
-                }
-            );
+                        headers: {
+                            "Content-Type":
+                                "application/json"
+                        },
+
+                        body: JSON.stringify({
+                            username: username
+                        })
+                    }
+                );
 
 
-            const data = await response.json();
+            const data =
+                await response.json();
 
 
             if (!response.ok) {
 
                 status.textContent =
-                    "❌ " + (
+                    "❌ " +
+                    (
                         data.detail ||
                         "تعذر التحقق من الحساب"
                     );
@@ -233,17 +348,24 @@
             }
 
 
-            verifiedUserId = data.user_id;
+            verifiedUserId =
+                data.user_id;
 
 
-            document.getElementById(
-                "usernameBox"
-            ).style.display = "none";
+            document
+                .getElementById(
+                    "usernameBox"
+                )
+                .style.display =
+                "none";
 
 
-            document.getElementById(
-                "verifyBox"
-            ).style.display = "block";
+            document
+                .getElementById(
+                    "verifyBox"
+                )
+                .style.display =
+                "block";
 
 
             status.textContent =
@@ -269,12 +391,15 @@
     async function verifyCode() {
 
         const code =
-            document.getElementById("code").value
-            .trim()
-            .toLowerCase();
+            document
+                .getElementById("code")
+                .value
+                .trim()
+                .toLowerCase();
 
         const status =
-            document.getElementById("status");
+            document
+                .getElementById("status");
 
 
         if (!code) {
@@ -301,30 +426,39 @@
                 "🔐 جاري التحقق من الرمز...";
 
 
-            const response = await fetch(
-                "/auth/verify",
-                {
-                    method: "POST",
+            const response =
+                await fetch(
+                    "/auth/verify",
+                    {
 
-                    headers: {
-                        "Content-Type": "application/json"
-                    },
+                        method: "POST",
 
-                    body: JSON.stringify({
-                        user_id: verifiedUserId,
-                        code: code
-                    })
-                }
-            );
+                        headers: {
+                            "Content-Type":
+                                "application/json"
+                        },
+
+                        body: JSON.stringify({
+
+                            user_id:
+                                verifiedUserId,
+
+                            code:
+                                code
+                        })
+                    }
+                );
 
 
-            const data = await response.json();
+            const data =
+                await response.json();
 
 
             if (!response.ok) {
 
                 status.textContent =
-                    "❌ " + (
+                    "❌ " +
+                    (
                         data.detail ||
                         "رمز التحقق غير صحيح"
                     );
@@ -333,22 +467,29 @@
             }
 
 
-            clearInterval(timerInterval);
+            clearInterval(
+                timerInterval
+            );
 
 
-            document.getElementById(
-                "verifyBox"
-            ).style.display = "none";
+            document
+                .getElementById(
+                    "verifyBox"
+                )
+                .style.display =
+                "none";
 
 
-            document.getElementById(
-                "voiceButton"
-            ).style.display = "block";
+            document
+                .getElementById(
+                    "voiceButton"
+                )
+                .style.display =
+                "block";
 
 
             status.textContent =
                 "✅ تم التحقق من الحساب بنجاح";
-
 
         } catch (error) {
 
@@ -366,58 +507,80 @@
 
     function startTimer() {
 
-        clearInterval(timerInterval);
+        clearInterval(
+            timerInterval
+        );
 
         secondsLeft = 600;
 
         updateTimer();
 
 
-        timerInterval = setInterval(() => {
+        timerInterval =
+            setInterval(() => {
 
-            secondsLeft--;
+                secondsLeft--;
 
-            updateTimer();
-
-
-            if (secondsLeft <= 0) {
-
-                clearInterval(timerInterval);
-
-                document.getElementById(
-                    "verifyBox"
-                ).style.display = "none";
+                updateTimer();
 
 
-                document.getElementById(
-                    "usernameBox"
-                ).style.display = "block";
+                if (secondsLeft <= 0) {
+
+                    clearInterval(
+                        timerInterval
+                    );
 
 
-                document.getElementById(
-                    "status"
-                ).textContent =
-                    "⏰ انتهت صلاحية الرمز، اطلب رمزاً جديداً";
-            }
+                    document
+                        .getElementById(
+                            "verifyBox"
+                        )
+                        .style.display =
+                        "none";
 
-        }, 1000);
+
+                    document
+                        .getElementById(
+                            "usernameBox"
+                        )
+                        .style.display =
+                        "block";
+
+
+                    document
+                        .getElementById(
+                            "status"
+                        )
+                        .textContent =
+                        "⏰ انتهت صلاحية الرمز، اطلب رمزاً جديداً";
+
+                }
+
+            }, 1000);
     }
 
 
     function updateTimer() {
 
         const minutes =
-            Math.floor(secondsLeft / 60);
+            Math.floor(
+                secondsLeft / 60
+            );
 
         const seconds =
             secondsLeft % 60;
 
-        document.getElementById(
-            "timer"
-        ).textContent =
+
+        document
+            .getElementById(
+                "timer"
+            )
+            .textContent =
             "صلاحية الرمز: " +
-            minutes + ":" +
-            String(seconds).padStart(2, "0");
+            minutes +
+            ":" +
+            String(seconds)
+                .padStart(2, "0");
     }
 
 
@@ -428,7 +591,10 @@
     async function connectVoice() {
 
         const status =
-            document.getElementById("status");
+            document
+                .getElementById(
+                    "status"
+                );
 
 
         if (!verifiedUserId) {
@@ -446,14 +612,17 @@
                 "🎙️ جاري تشغيل المايك...";
 
 
-            const response = await fetch(
-                `/voice/token?user_id=${encodeURIComponent(
-                    verifiedUserId
-                )}`
-            );
+            const response =
+                await fetch(
+                    "/voice/token?user_id=" +
+                    encodeURIComponent(
+                        verifiedUserId
+                    )
+                );
 
 
-            const data = await response.json();
+            const data =
+                await response.json();
 
 
             if (!response.ok) {
@@ -465,25 +634,147 @@
             }
 
 
-            room = new LivekitClient.Room();
+            maxVoiceDistance =
+                Number(
+                    data.voice_max_distance ||
+                    80
+                );
 
+
+            fullVolumeDistance =
+                Number(
+                    data.voice_full_volume_distance ||
+                    5
+                );
+
+
+            room =
+                new LivekitClient.Room({
+
+                    adaptiveStream: true,
+
+                    dynacast: true
+                });
+
+
+            // =================================================
+            // PLAYER JOINS
+            // =================================================
 
             room.on(
                 LivekitClient.RoomEvent.TrackSubscribed,
-                (track) => {
+                (
+                    track,
+                    publication,
+                    participant
+                ) => {
 
-                    if (track.kind === "audio") {
+                    if (
+                        track.kind !== "audio"
+                    ) {
+                        return;
+                    }
 
-                        const element =
-                            track.attach();
 
-                        document.body.appendChild(
-                            element
+                    const element =
+                        track.attach();
+
+
+                    element.autoplay =
+                        true;
+
+
+                    element.playsInline =
+                        true;
+
+
+                    element.dataset
+                        .participantIdentity =
+                        participant.identity;
+
+
+                    document.body.appendChild(
+                        element
+                    );
+
+
+                    if (
+                        !remoteAudio.has(
+                            participant.identity
+                        )
+                    ) {
+
+                        remoteAudio.set(
+                            participant.identity,
+                            new Set()
                         );
                     }
+
+
+                    remoteAudio
+                        .get(
+                            participant.identity
+                        )
+                        .add(element);
+
+
+                    updateAllAudioVolumes();
                 }
             );
 
+
+            // =================================================
+            // PLAYER LEAVES
+            // =================================================
+
+            room.on(
+                LivekitClient.RoomEvent.TrackUnsubscribed,
+                (
+                    track,
+                    publication,
+                    participant
+                ) => {
+
+                    const elements =
+                        remoteAudio.get(
+                            participant.identity
+                        );
+
+
+                    if (elements) {
+
+                        for (
+                            const element
+                            of elements
+                        ) {
+
+                            try {
+
+                                element.remove();
+
+                            } catch (_) {}
+
+                        }
+
+
+                        remoteAudio.delete(
+                            participant.identity
+                        );
+                    }
+
+
+                    try {
+
+                        track.detach();
+
+                    } catch (_) {}
+                }
+            );
+
+
+            // =================================================
+            // CONNECT
+            // =================================================
 
             await room.connect(
                 data.url,
@@ -491,65 +782,442 @@
             );
 
 
+            // =================================================
+            // MICROPHONE
+            // =================================================
+
             await room.localParticipant
-                .setMicrophoneEnabled(true);
+                .setMicrophoneEnabled(
+                    true
+                );
 
 
-            document.getElementById(
-                "voiceButton"
-            ).style.display = "none";
+            // =================================================
+            // UI
+            // =================================================
+
+            document
+                .getElementById(
+                    "voiceButton"
+                )
+                .style.display =
+                "none";
 
 
-            document.getElementById(
-                "disconnectButton"
-            ).style.display = "block";
+            document
+                .getElementById(
+                    "disconnectButton"
+                )
+                .style.display =
+                "block";
+
+
+            document
+                .getElementById(
+                    "voiceInfo"
+                )
+                .style.display =
+                "block";
 
 
             status.textContent =
                 "🟢 أنت الآن داخل الصوت";
 
 
+            // =================================================
+            // START POSITION CHECK
+            // =================================================
+
+            startPositionUpdates();
+
         } catch (error) {
 
             console.error(error);
 
             status.textContent =
-                "❌ " + error.message;
+                "❌ " +
+                error.message;
         }
     }
 
 
     // =====================================================
-    // DISCONNECT VOICE
+    // GET ROBLOX POSITIONS
+    // =====================================================
+
+    async function updatePositions() {
+
+        if (!verifiedUserId) {
+            return;
+        }
+
+
+        try {
+
+            const response =
+                await fetch(
+                    "/roblox/players",
+                    {
+                        cache: "no-store"
+                    }
+                );
+
+
+            if (!response.ok) {
+                return;
+            }
+
+
+            const players =
+                await response.json();
+
+
+            ownPosition =
+                players[
+                    String(verifiedUserId)
+                ];
+
+
+            if (!ownPosition) {
+
+                updateAllAudioVolumes();
+
+                return;
+            }
+
+
+            updateAllAudioVolumes(
+                players
+            );
+
+        } catch (error) {
+
+            console.error(
+                "Position update error:",
+                error
+            );
+        }
+    }
+
+
+    // =====================================================
+    // START POSITION UPDATES
+    // =====================================================
+
+    function startPositionUpdates() {
+
+        stopPositionUpdates();
+
+        updatePositions();
+
+
+        positionInterval =
+            setInterval(
+                updatePositions,
+                500
+            );
+    }
+
+
+    // =====================================================
+    // STOP POSITION UPDATES
+    // =====================================================
+
+    function stopPositionUpdates() {
+
+        if (positionInterval) {
+
+            clearInterval(
+                positionInterval
+            );
+
+            positionInterval = null;
+        }
+    }
+
+
+    // =====================================================
+    // DISTANCE
+    // =====================================================
+
+    function getDistance(
+        a,
+        b
+    ) {
+
+        if (!a || !b) {
+            return Infinity;
+        }
+
+
+        const dx =
+            Number(a.x) -
+            Number(b.x);
+
+        const dy =
+            Number(a.y) -
+            Number(b.y);
+
+        const dz =
+            Number(a.z) -
+            Number(b.z);
+
+
+        return Math.sqrt(
+            dx * dx +
+            dy * dy +
+            dz * dz
+        );
+    }
+
+
+    // =====================================================
+    // CALCULATE VOLUME
+    // =====================================================
+
+    function calculateVolume(
+        distance
+    ) {
+
+        if (
+            !Number.isFinite(
+                distance
+            )
+        ) {
+
+            return 0;
+        }
+
+
+        // خارج المدى
+        if (
+            distance >=
+            maxVoiceDistance
+        ) {
+
+            return 0;
+        }
+
+
+        // قريب جداً
+        if (
+            distance <=
+            fullVolumeDistance
+        ) {
+
+            return 1;
+        }
+
+
+        const range =
+            maxVoiceDistance -
+            fullVolumeDistance;
+
+
+        const position =
+            (
+                distance -
+                fullVolumeDistance
+            ) / range;
+
+
+        // منحنى صوت طبيعي أكثر
+        const volume =
+            1 -
+            Math.pow(
+                position,
+                1.35
+            );
+
+
+        return Math.max(
+            0,
+            Math.min(
+                1,
+                volume
+            )
+        );
+    }
+
+
+    // =====================================================
+    // UPDATE ALL REMOTE AUDIO
+    // =====================================================
+
+    function updateAllAudioVolumes(
+        players = null
+    ) {
+
+        if (!room) {
+            return;
+        }
+
+
+        // إذا لم نستلم اللاعبين في نفس الاستدعاء
+        // نستخدم آخر نسخة من السيرفر
+        if (!players) {
+
+            return;
+        }
+
+
+        for (
+            const [
+                identity,
+                elements
+            ]
+            of remoteAudio
+        ) {
+
+            // identity = roblox_123456
+            const userId =
+                identity.startsWith(
+                    "roblox_"
+                )
+                    ? identity.substring(7)
+                    : null;
+
+
+            if (!userId) {
+
+                for (
+                    const element
+                    of elements
+                ) {
+
+                    element.volume = 0;
+                }
+
+                continue;
+            }
+
+
+            const remotePosition =
+                players[userId];
+
+
+            if (
+                !remotePosition ||
+                !ownPosition
+            ) {
+
+                for (
+                    const element
+                    of elements
+                ) {
+
+                    element.volume = 0;
+                }
+
+                continue;
+            }
+
+
+            const distance =
+                getDistance(
+                    ownPosition,
+                    remotePosition
+                );
+
+
+            const volume =
+                calculateVolume(
+                    distance
+                );
+
+
+            for (
+                const element
+                of elements
+            ) {
+
+                element.volume =
+                    volume;
+            }
+        }
+    }
+
+
+    // =====================================================
+    // DISCONNECT
     // =====================================================
 
     async function disconnectVoice() {
 
+        stopPositionUpdates();
+
+
         if (room) {
 
-            await room.disconnect();
+            try {
+
+                await room.disconnect();
+
+            } catch (_) {}
 
             room = null;
         }
 
 
-        document.getElementById(
-            "disconnectButton"
-        ).style.display = "none";
+        for (
+            const elements
+            of remoteAudio.values()
+        ) {
+
+            for (
+                const element
+                of elements
+            ) {
+
+                try {
+
+                    element.remove();
+
+                } catch (_) {}
+            }
+        }
 
 
-        document.getElementById(
-            "voiceButton"
-        ).style.display = "block";
+        remoteAudio.clear();
 
 
-        document.getElementById(
-            "status"
-        ).textContent =
+        ownPosition = null;
+
+
+        document
+            .getElementById(
+                "disconnectButton"
+            )
+            .style.display =
+            "none";
+
+
+        document
+            .getElementById(
+                "voiceButton"
+            )
+            .style.display =
+            "block";
+
+
+        document
+            .getElementById(
+                "voiceInfo"
+            )
+            .style.display =
+            "none";
+
+
+        document
+            .getElementById(
+                "status"
+            )
+            .textContent =
             "🔴 خرجت من الصوت";
     }
 
 </script>
 
 </body>
+
 </html>
