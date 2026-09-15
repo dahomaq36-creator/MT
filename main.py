@@ -1,6 +1,8 @@
 import os
 import time
-from fastapi import FastAPI, HTTPException
+
+from fastapi import FastAPI
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from livekit import api
 
@@ -24,13 +26,16 @@ class Player(BaseModel):
 players = {}
 
 
+# الصفحة الرئيسية
 @app.get("/")
 async def home():
-    return {"status": "MT Voice Server Online"}
+    return FileResponse("static/index.html")
 
 
+# استقبال موقع اللاعب من Roblox
 @app.post("/roblox/player")
 async def update_player(player: Player):
+
     players[str(player.user_id)] = {
         "x": player.x,
         "y": player.y,
@@ -38,9 +43,12 @@ async def update_player(player: Player):
         "updated": time.time()
     }
 
-    return {"ok": True}
+    return {
+        "ok": True
+    }
 
 
+# إعطاء توكن LiveKit للموقع
 @app.get("/voice/token")
 async def voice_token(user_id: str):
 
@@ -70,3 +78,9 @@ async def voice_token(user_id: str):
         "token": token.to_jwt(),
         "room": room_name
     }
+
+
+# معرفة مواقع اللاعبين
+@app.get("/roblox/players")
+async def get_players():
+    return players
