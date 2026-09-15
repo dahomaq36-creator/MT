@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
     <title>MT Voice</title>
 
     <script src="https://cdn.jsdelivr.net/npm/livekit-client/dist/livekit-client.umd.min.js"></script>
@@ -28,7 +29,12 @@
             text-align: center;
         }
 
-        input, button {
+        h1 {
+            margin-bottom: 20px;
+        }
+
+        input,
+        button {
             width: 100%;
             box-sizing: border-box;
             padding: 12px;
@@ -37,13 +43,36 @@
             border: none;
         }
 
+        input {
+            background: #2a2a2a;
+            color: white;
+            outline: none;
+        }
+
         button {
             cursor: pointer;
             font-weight: bold;
         }
 
+        #verifyBox {
+            display: none;
+        }
+
         #status {
             margin-top: 15px;
+            line-height: 1.6;
+        }
+
+        #timer {
+            margin-top: 10px;
+            color: #aaa;
+        }
+
+        #code {
+            text-align: center;
+            direction: ltr;
+            font-size: 22px;
+            letter-spacing: 3px;
         }
     </style>
 </head>
@@ -51,83 +80,475 @@
 <body>
 
 <div class="box">
+
     <h1>MT Voice</h1>
 
-    <input
-        id="userId"
-        type="text"
-        placeholder="اكتب Roblox User ID"
-    >
+    <!-- ============================= -->
+    <!-- USERNAME -->
+    <!-- ============================= -->
 
-    <button onclick="connectVoice()">
+    <div id="usernameBox">
+
+        <input
+            id="username"
+            type="text"
+            placeholder="اكتب Roblox Username"
+            autocomplete="off"
+        >
+
+        <button onclick="requestCode()">
+            🔎 التحقق من الحساب
+        </button>
+
+    </div>
+
+
+    <!-- ============================= -->
+    <!-- VERIFICATION -->
+    <!-- ============================= -->
+
+    <div id="verifyBox">
+
+        <p>
+            تم العثور على الحساب داخل الماب ✅
+        </p>
+
+        <p>
+            اكتب رمز التحقق الظاهر لك داخل الماب
+        </p>
+
+        <input
+            id="code"
+            type="text"
+            maxlength="8"
+            placeholder="XXXXXXXX"
+            autocomplete="off"
+        >
+
+        <button onclick="verifyCode()">
+            🔐 تأكيد الرمز
+        </button>
+
+        <div id="timer">
+            صلاحية الرمز: 10:00
+        </div>
+
+    </div>
+
+
+    <!-- ============================= -->
+    <!-- VOICE -->
+    <!-- ============================= -->
+
+    <button
+        id="voiceButton"
+        onclick="connectVoice()"
+        style="display:none;"
+    >
         🎙️ دخول الصوت
     </button>
 
-    <button onclick="disconnectVoice()">
-        🔴 خروج
+    <button
+        id="disconnectButton"
+        onclick="disconnectVoice()"
+        style="display:none;"
+    >
+        🔴 خروج من الصوت
     </button>
+
 
     <div id="status">
         غير متصل
     </div>
+
 </div>
 
+
 <script>
+
     let room = null;
 
-    async function connectVoice() {
-        const userId = document.getElementById("userId").value.trim();
-        const status = document.getElementById("status");
+    let verifiedUserId = null;
 
-        if (!userId) {
-            status.textContent = "اكتب Roblox User ID أول";
+    let timerInterval = null;
+
+    let secondsLeft = 600;
+
+
+    // =====================================================
+    // REQUEST VERIFICATION CODE
+    // =====================================================
+
+    async function requestCode() {
+
+        const username =
+            document.getElementById("username").value.trim();
+
+        const status =
+            document.getElementById("status");
+
+        if (!username) {
+
+            status.textContent =
+                "❌ اكتب Roblox Username أول";
+
             return;
         }
 
+
         try {
-            status.textContent = "جاري الاتصال...";
+
+            status.textContent =
+                "🔎 جاري التحقق من الحساب...";
+
 
             const response = await fetch(
-                `/voice/token?user_id=${encodeURIComponent(userId)}`
+                "/auth/request",
+                {
+                    method: "POST",
+
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+
+                    body: JSON.stringify({
+                        username: username
+                    })
+                }
             );
 
-            if (!response.ok) {
-                throw new Error("فشل الحصول على التوكن");
-            }
 
             const data = await response.json();
 
+
+            if (!response.ok) {
+
+                status.textContent =
+                    "❌ " + (
+                        data.detail ||
+                        "تعذر التحقق من الحساب"
+                    );
+
+                return;
+            }
+
+
+            verifiedUserId = data.user_id;
+
+
+            document.getElementById(
+                "usernameBox"
+            ).style.display = "none";
+
+
+            document.getElementById(
+                "verifyBox"
+            ).style.display = "block";
+
+
+            status.textContent =
+                "🟡 تم العثور على حسابك، أدخل رمز التحقق";
+
+
+            startTimer();
+
+        } catch (error) {
+
+            console.error(error);
+
+            status.textContent =
+                "❌ تعذر الاتصال بالسيرفر";
+        }
+    }
+
+
+    // =====================================================
+    // VERIFY CODE
+    // =====================================================
+
+    async function verifyCode() {
+
+        const code =
+            document.getElementById("code").value
+            .trim()
+            .toLowerCase();
+
+        const status =
+            document.getElementById("status");
+
+
+        if (!code) {
+
+            status.textContent =
+                "❌ اكتب رمز التحقق";
+
+            return;
+        }
+
+
+        if (code.length !== 8) {
+
+            status.textContent =
+                "❌ الرمز يجب أن يكون 8 خانات";
+
+            return;
+        }
+
+
+        try {
+
+            status.textContent =
+                "🔐 جاري التحقق من الرمز...";
+
+
+            const response = await fetch(
+                "/auth/verify",
+                {
+                    method: "POST",
+
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+
+                    body: JSON.stringify({
+                        user_id: verifiedUserId,
+                        code: code
+                    })
+                }
+            );
+
+
+            const data = await response.json();
+
+
+            if (!response.ok) {
+
+                status.textContent =
+                    "❌ " + (
+                        data.detail ||
+                        "رمز التحقق غير صحيح"
+                    );
+
+                return;
+            }
+
+
+            clearInterval(timerInterval);
+
+
+            document.getElementById(
+                "verifyBox"
+            ).style.display = "none";
+
+
+            document.getElementById(
+                "voiceButton"
+            ).style.display = "block";
+
+
+            status.textContent =
+                "✅ تم التحقق من الحساب بنجاح";
+
+
+        } catch (error) {
+
+            console.error(error);
+
+            status.textContent =
+                "❌ تعذر الاتصال بالسيرفر";
+        }
+    }
+
+
+    // =====================================================
+    // TIMER
+    // =====================================================
+
+    function startTimer() {
+
+        clearInterval(timerInterval);
+
+        secondsLeft = 600;
+
+        updateTimer();
+
+
+        timerInterval = setInterval(() => {
+
+            secondsLeft--;
+
+            updateTimer();
+
+
+            if (secondsLeft <= 0) {
+
+                clearInterval(timerInterval);
+
+                document.getElementById(
+                    "verifyBox"
+                ).style.display = "none";
+
+
+                document.getElementById(
+                    "usernameBox"
+                ).style.display = "block";
+
+
+                document.getElementById(
+                    "status"
+                ).textContent =
+                    "⏰ انتهت صلاحية الرمز، اطلب رمزاً جديداً";
+            }
+
+        }, 1000);
+    }
+
+
+    function updateTimer() {
+
+        const minutes =
+            Math.floor(secondsLeft / 60);
+
+        const seconds =
+            secondsLeft % 60;
+
+        document.getElementById(
+            "timer"
+        ).textContent =
+            "صلاحية الرمز: " +
+            minutes + ":" +
+            String(seconds).padStart(2, "0");
+    }
+
+
+    // =====================================================
+    // CONNECT VOICE
+    // =====================================================
+
+    async function connectVoice() {
+
+        const status =
+            document.getElementById("status");
+
+
+        if (!verifiedUserId) {
+
+            status.textContent =
+                "❌ تحقق من حسابك أول";
+
+            return;
+        }
+
+
+        try {
+
+            status.textContent =
+                "🎙️ جاري تشغيل المايك...";
+
+
+            const response = await fetch(
+                `/voice/token?user_id=${encodeURIComponent(
+                    verifiedUserId
+                )}`
+            );
+
+
+            const data = await response.json();
+
+
+            if (!response.ok) {
+
+                throw new Error(
+                    data.detail ||
+                    "فشل الحصول على توكن الصوت"
+                );
+            }
+
+
             room = new LivekitClient.Room();
+
 
             room.on(
                 LivekitClient.RoomEvent.TrackSubscribed,
                 (track) => {
+
                     if (track.kind === "audio") {
-                        const element = track.attach();
-                        document.body.appendChild(element);
+
+                        const element =
+                            track.attach();
+
+                        document.body.appendChild(
+                            element
+                        );
                     }
                 }
             );
 
-            await room.connect(data.url, data.token);
 
-            await room.localParticipant.setMicrophoneEnabled(true);
+            await room.connect(
+                data.url,
+                data.token
+            );
 
-            status.textContent = "🟢 متصل بالصوت";
+
+            await room.localParticipant
+                .setMicrophoneEnabled(true);
+
+
+            document.getElementById(
+                "voiceButton"
+            ).style.display = "none";
+
+
+            document.getElementById(
+                "disconnectButton"
+            ).style.display = "block";
+
+
+            status.textContent =
+                "🟢 أنت الآن داخل الصوت";
+
+
         } catch (error) {
+
             console.error(error);
-            status.textContent = "❌ صار خطأ بالاتصال";
+
+            status.textContent =
+                "❌ " + error.message;
         }
     }
 
+
+    // =====================================================
+    // DISCONNECT VOICE
+    // =====================================================
+
     async function disconnectVoice() {
+
         if (room) {
+
             await room.disconnect();
+
             room = null;
         }
 
-        document.getElementById("status").textContent = "🔴 غير متصل";
+
+        document.getElementById(
+            "disconnectButton"
+        ).style.display = "none";
+
+
+        document.getElementById(
+            "voiceButton"
+        ).style.display = "block";
+
+
+        document.getElementById(
+            "status"
+        ).textContent =
+            "🔴 خرجت من الصوت";
     }
+
 </script>
 
 </body>
