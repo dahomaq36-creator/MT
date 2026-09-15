@@ -1,534 +1,289 @@
-import os
-import time
-import secrets
-import string
-from pathlib import Path
+local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
 
-import httpx
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
-from pydantic import BaseModel
-from livekit import api
+local API_URL = "https://mt-o8ez.onrender.com"
 
 
-# =========================================================
-# MT VOICE SERVER
-# =========================================================
+-- =====================================================
+-- SEND PLAYER POSITION
+-- =====================================================
 
-app = FastAPI(
-    title="MT Voice",
-    version="2.0.0"
-)
+local function sendPlayerPosition(player)
 
+	local character = player.Character
 
-# =========================================================
-# PATHS
-# =========================================================
+	if not character then
+		return
+	end
 
-BASE_DIR = Path(__file__).resolve().parent
-STATIC_DIR = BASE_DIR / "static"
-INDEX_FILE = STATIC_DIR / "index.html"
+	local root = character:FindFirstChild("HumanoidRootPart")
 
+	if not root then
+		return
+	end
 
-# =========================================================
-# LIVEKIT ENVIRONMENT VARIABLES
-# =========================================================
+	local position = root.Position
 
-LIVEKIT_URL = os.getenv("LIVEKIT_URL")
-LIVEKIT_API_KEY = os.getenv("LIVEKIT_API_KEY")
-LIVEKIT_API_SECRET = os.getenv("LIVEKIT_API_SECRET")
+	local data = {
+		user_id = player.UserId,
+		x = position.X,
+		y = position.Y,
+		z = position.Z
+	}
 
-if not LIVEKIT_URL:
-    raise RuntimeError("LIVEKIT_URL is missing")
+	local success, response = pcall(function()
 
-if not LIVEKIT_API_KEY:
-    raise RuntimeError("LIVEKIT_API_KEY is missing")
+		return HttpService:RequestAsync({
 
-if not LIVEKIT_API_SECRET:
-    raise RuntimeError("LIVEKIT_API_SECRET is missing")
+			Url = API_URL .. "/roblox/player",
 
+			Method = "POST",
 
-# =========================================================
-# SETTINGS
-# =========================================================
+			Headers = {
+				["Content-Type"] = "application/json"
+			},
 
-ROOM_NAME = "mt-rp"
+			Body = HttpService:JSONEncode(data)
 
-# اللاعب يعتبر داخل الماب إذا وصل تحديثه خلال هذه المدة
-PLAYER_TIMEOUT = 10
+		})
 
-# مدة الرمز: 10 دقائق
-CODE_EXPIRE_SECONDS = 600
+	end)
 
-# عدد محاولات إدخال الرمز
-MAX_CODE_ATTEMPTS = 5
+	if not success then
 
+		warn(
+			"MT Voice: Failed to send player position:",
+			response
+		)
 
-# =========================================================
-# MEMORY
-# =========================================================
+	end
 
-players = {}
+end
 
-verification_codes = {}
 
-verified_sessions = {}
+-- =====================================================
+-- CHECK VERIFICATION CODE
+-- =====================================================
 
+local function checkVerificationCode(player)
 
-# =========================================================
-# MODELS
-# =========================================================
+	local success, response = pcall(function()
 
-class Player(BaseModel):
-    user_id: int
-    x: float
-    y: float
-    z: float
+		return HttpService:GetAsync(
+			API_URL ..
+			"/roblox/verification/" ..
+			player.UserId
+		)
 
+	end)
 
-class UsernameRequest(BaseModel):
-    username: str
 
+	if not success then
 
-class VerifyCodeRequest(BaseModel):
-    user_id: int
-    code: str
+		warn(
+			"MT Voice: Failed to check verification:",
+			response
+		)
 
+		return
 
-# =========================================================
-# WEBSITE
-# =========================================================
+	end
 
-@app.get("/")
-async def home():
 
-    if not INDEX_FILE.exists():
-        raise HTTPException(
-            status_code=500,
-            detail="static/index.html not found"
-        )
+	local successDecode, data = pcall(function()
 
-    return FileResponse(
-        INDEX_FILE,
-        media_type="text/html"
-    )
+		return HttpService:JSONDecode(response)
 
+	end)
 
-# =========================================================
-# HEALTH CHECK
-# =========================================================
 
-@app.get("/health")
-async def health():
+	if not successDecode then
 
-    return {
-        "status": "online",
-        "service": "MT Voice"
-    }
+		return
 
+	end
 
-# =========================================================
-# ROBLOX PLAYER POSITION
-# =========================================================
 
-@app.post("/roblox/player")
-async def update_player(player: Player):
+	if not data.pending then
 
-    players[str(player.user_id)] = {
-        "x": player.x,
-        "y": player.y,
-        "z": player.z,
-        "updated": time.time()
-    }
+		return
 
-    return {
-        "ok": True
-    }
+	end
 
 
-# =========================================================
-# GET ACTIVE PLAYERS
-# =========================================================
+	local code = data.code
 
-@app.get("/roblox/players")
-async def get_players():
 
-    current_time = time.time()
+	-- =================================================
+	-- SHOW CODE TO PLAYER
+	-- =================================================
 
-    active_players = {
-        user_id: data
-        for user_id, data in players.items()
-        if current_time - data["updated"] <= PLAYER_TIMEOUT
-    }
+	local playerGui = player:FindFirstChild("PlayerGui")
 
-    return active_players
+	if not playerGui then
+		return
+	end
 
 
-# =========================================================
-# ROBLOX USERNAME -> USER ID
-# =========================================================
+	local oldGui = playerGui:FindFirstChild(
+		"MTVoiceVerification"
+	)
 
-async def get_roblox_user(username: str):
+	if oldGui then
 
-    username = username.strip()
+		local codeLabel =
+			oldGui:FindFirstChild(
+				"CodeLabel",
+				true
+			)
 
-    if not username:
-        return None
+		if codeLabel then
 
-    url = "https://users.roblox.com/v1/usernames/users"
+			codeLabel.Text =
+				"رمز MT Voice: " .. code
 
-    payload = {
-        "usernames": [username],
-        "excludeBannedUsers": False
-    }
+		end
 
-    try:
+		return
 
-        async with httpx.AsyncClient(timeout=10) as client:
+	end
 
-            response = await client.post(
-                url,
-                json=payload
-            )
 
-            if response.status_code != 200:
-                return None
+	-- =================================================
+	-- CREATE GUI
+	-- =================================================
 
-            data = response.json()
+	local screenGui = Instance.new("ScreenGui")
 
-            users = data.get("data", [])
+	screenGui.Name =
+		"MTVoiceVerification"
 
-            if not users:
-                return None
+	screenGui.ResetOnSpawn = false
 
-            user = users[0]
+	screenGui.Parent = playerGui
 
-            return {
-                "id": int(user["id"]),
-                "name": user["name"],
-                "display_name": user.get(
-                    "displayName",
-                    user["name"]
-                )
-            }
 
-    except Exception:
+	local frame = Instance.new("Frame")
 
-        return None
+	frame.Size =
+		UDim2.new(0, 360, 0, 150)
 
+	frame.Position =
+		UDim2.new(0.5, -180, 0.15, 0)
 
-# =========================================================
-# GENERATE NEW 8 CHARACTER CODE
-# =========================================================
+	frame.BackgroundColor3 =
+		Color3.fromRGB(25, 25, 25)
 
-def generate_code():
+	frame.BorderSizePixel = 0
 
-    characters = string.ascii_lowercase + string.digits
+	frame.Parent = screenGui
 
-    while True:
 
-        code = "".join(
-            secrets.choice(characters)
-            for _ in range(8)
-        )
+	local corner =
+		Instance.new("UICorner")
 
-        # نتأكد أن الرمز غير مستخدم حالياً
-        used = any(
-            item["code"] == code
-            and time.time() - item["created"] <= CODE_EXPIRE_SECONDS
-            for item in verification_codes.values()
-        )
+	corner.CornerRadius =
+		UDim.new(0, 12)
 
-        if not used:
-            return code
+	corner.Parent = frame
 
 
-# =========================================================
-# REMOVE EXPIRED VERIFICATIONS
-# =========================================================
+	local title =
+		Instance.new("TextLabel")
 
-def cleanup_verifications():
+	title.Size =
+		UDim2.new(1, 0, 0, 40)
 
-    current_time = time.time()
+	title.Position =
+		UDim2.new(0, 0, 0, 5)
 
-    expired_users = []
+	title.BackgroundTransparency = 1
 
-    for user_id, data in verification_codes.items():
+	title.Text =
+		"🔐 MT Voice"
 
-        if current_time - data["created"] > CODE_EXPIRE_SECONDS:
-            expired_users.append(user_id)
+	title.TextColor3 =
+		Color3.fromRGB(255, 255, 255)
 
-    for user_id in expired_users:
-        verification_codes.pop(user_id, None)
+	title.TextScaled = true
 
+	title.Font =
+		Enum.Font.GothamBold
 
-# =========================================================
-# REQUEST VERIFICATION CODE
-# =========================================================
+	title.Parent = frame
 
-@app.post("/auth/request")
-async def request_verification(request: UsernameRequest):
 
-    cleanup_verifications()
+	local codeLabel =
+		Instance.new("TextLabel")
 
-    user = await get_roblox_user(request.username)
+	codeLabel.Name =
+		"CodeLabel"
 
-    if not user:
-        raise HTTPException(
-            status_code=404,
-            detail="حساب Roblox غير موجود"
-        )
+	codeLabel.Size =
+		UDim2.new(1, -20, 0, 55)
 
-    user_id = str(user["id"])
+	codeLabel.Position =
+		UDim2.new(0, 10, 0, 50)
 
-    # هل اللاعب داخل الماب؟
-    player = players.get(user_id)
+	codeLabel.BackgroundTransparency = 1
 
-    if not player:
-        raise HTTPException(
-            status_code=403,
-            detail="تعذر التحقق، هذا الحساب غير موجود حالياً داخل الماب"
-        )
+	codeLabel.Text =
+		"رمز MT Voice: " .. code
 
-    # هل تحديث اللاعب قديم؟
-    if time.time() - player["updated"] > PLAYER_TIMEOUT:
+	codeLabel.TextColor3 =
+		Color3.fromRGB(255, 255, 255)
 
-        players.pop(user_id, None)
+	codeLabel.TextScaled = true
 
-        raise HTTPException(
-            status_code=403,
-            detail="تعذر التحقق، هذا الحساب غير موجود حالياً داخل الماب"
-        )
+	codeLabel.Font =
+		Enum.Font.GothamBold
 
-    # رمز جديد دائماً
-    code = generate_code()
+	codeLabel.Parent = frame
 
-    verification_codes[user_id] = {
-        "code": code,
-        "created": time.time(),
-        "attempts": 0,
-        "username": user["name"]
-    }
 
-    return {
-        "ok": True,
-        "user_id": int(user["id"]),
-        "username": user["name"],
-        "display_name": user["display_name"],
-        "message": "تم إنشاء رمز التحقق، اكتب الرمز الظاهر لك داخل الماب"
-    }
+	local info =
+		Instance.new("TextLabel")
 
+	info.Size =
+		UDim2.new(1, -20, 0, 30)
 
-# =========================================================
-# ROBLOX SCRIPT CHECKS FOR PLAYER CODE
-# =========================================================
+	info.Position =
+		UDim2.new(0, 10, 0, 108)
 
-@app.get("/roblox/verification/{user_id}")
-async def get_player_verification(user_id: int):
+	info.BackgroundTransparency = 1
 
-    cleanup_verifications()
+	info.Text =
+		"اكتب الرمز في موقع MT Voice - صالح لمدة 10 دقائق"
 
-    user_id = str(user_id)
+	info.TextColor3 =
+		Color3.fromRGB(180, 180, 180)
 
-    data = verification_codes.get(user_id)
+	info.TextScaled = true
 
-    if not data:
-        return {
-            "pending": False
-        }
+	info.Font =
+		Enum.Font.Gotham
 
-    if time.time() - data["created"] > CODE_EXPIRE_SECONDS:
+	info.Parent = frame
 
-        verification_codes.pop(user_id, None)
+end
 
-        return {
-            "pending": False
-        }
 
-    return {
-        "pending": True,
-        "code": data["code"],
-        "expires_in": max(
-            0,
-            int(
-                CODE_EXPIRE_SECONDS
-                - (time.time() - data["created"])
-            )
-        )
-    }
+-- =====================================================
+-- MAIN LOOP
+-- =====================================================
 
+while true do
 
-# =========================================================
-# VERIFY CODE
-# =========================================================
+	for _, player in ipairs(
+		Players:GetPlayers()
+	) do
 
-@app.post("/auth/verify")
-async def verify_code(request: VerifyCodeRequest):
+		sendPlayerPosition(player)
 
-    cleanup_verifications()
+		checkVerificationCode(player)
 
-    user_id = str(request.user_id)
+	end
 
-    data = verification_codes.get(user_id)
+	task.wait(1)
 
-    if not data:
-
-        raise HTTPException(
-            status_code=400,
-            detail="رمز التحقق غير موجود أو انتهت صلاحيته"
-        )
-
-    # التأكد أن اللاعب ما زال داخل الماب
-    player = players.get(user_id)
-
-    if not player:
-
-        verification_codes.pop(user_id, None)
-
-        raise HTTPException(
-            status_code=403,
-            detail="تعذر التحقق، الحساب لم يعد داخل الماب"
-        )
-
-    if time.time() - player["updated"] > PLAYER_TIMEOUT:
-
-        verification_codes.pop(user_id, None)
-
-        raise HTTPException(
-            status_code=403,
-            detail="تعذر التحقق، الحساب لم يعد داخل الماب"
-        )
-
-    # عدد المحاولات
-    if data["attempts"] >= MAX_CODE_ATTEMPTS:
-
-        verification_codes.pop(user_id, None)
-
-        raise HTTPException(
-            status_code=429,
-            detail="تم تجاوز عدد المحاولات، اطلب رمزاً جديداً"
-        )
-
-    entered_code = request.code.strip().lower()
-
-    if entered_code != data["code"]:
-
-        data["attempts"] += 1
-
-        remaining = MAX_CODE_ATTEMPTS - data["attempts"]
-
-        raise HTTPException(
-            status_code=400,
-            detail=f"رمز التحقق غير صحيح. المحاولات المتبقية: {remaining}"
-        )
-
-    # التحقق نجح
-    verification_codes.pop(user_id, None)
-
-    verified_sessions[user_id] = {
-        "verified": True,
-        "created": time.time()
-    }
-
-    return {
-        "ok": True,
-        "user_id": request.user_id,
-        "username": data["username"],
-        "message": "تم التحقق بنجاح"
-    }
-
-
-# =========================================================
-# LIVEKIT TOKEN
-# =========================================================
-
-@app.get("/voice/token")
-async def voice_token(user_id: str):
-
-    user_id = user_id.strip()
-
-    if not user_id:
-        raise HTTPException(
-            status_code=400,
-            detail="user_id is required"
-        )
-
-    if not user_id.isdigit():
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid Roblox User ID"
-        )
-
-    # لازم يكون الحساب متحقق أول
-    session = verified_sessions.get(user_id)
-
-    if not session:
-        raise HTTPException(
-            status_code=403,
-            detail="يجب التحقق من الحساب أولاً"
-        )
-
-    # التأكد أن اللاعب ما زال داخل الماب
-    player = players.get(user_id)
-
-    if not player:
-        verified_sessions.pop(user_id, None)
-
-        raise HTTPException(
-            status_code=403,
-            detail="الحساب لم يعد داخل الماب"
-        )
-
-    if time.time() - player["updated"] > PLAYER_TIMEOUT:
-
-        verified_sessions.pop(user_id, None)
-
-        raise HTTPException(
-            status_code=403,
-            detail="الحساب لم يعد داخل الماب"
-        )
-
-    identity = f"roblox_{user_id}"
-
-    token = (
-        api.AccessToken(
-            LIVEKIT_API_KEY,
-            LIVEKIT_API_SECRET
-        )
-        .with_identity(identity)
-        .with_name(identity)
-        .with_grants(
-            api.VideoGrants(
-                room_join=True,
-                room=ROOM_NAME,
-                can_publish=True,
-                can_subscribe=True,
-                can_publish_data=True
-            )
-        )
-    )
-
-    return {
-        "url": LIVEKIT_URL,
-        "token": token.to_jwt(),
-        "room": ROOM_NAME,
-        "identity": identity
-    }
-
-
-# =========================================================
-# CLEANUP
-# =========================================================
-
-@app.on_event("startup")
-async def startup():
-
-    print("====================================")
-    print("MT Voice Server Started")
-    print("LiveKit: Connected Configuration")
-    print("Room:", ROOM_NAME)
-    print("Verification: Enabled")
-    print("Code Length: 8")
-    print("Code Expiry: 10 Minutes")
-    print("Room:", ROOM_NAME)
-    print("====================================")
+end
