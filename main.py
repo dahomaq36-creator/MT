@@ -7,9 +7,9 @@ from pathlib import Path
 import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from livekit import api
-
 
 # =========================================================
 # MT VOICE SERVER
@@ -17,9 +17,20 @@ from livekit import api
 
 app = FastAPI(
     title="MT Voice",
-    version="3.0.0"
+    version="3.0.1"
 )
 
+# =========================================================
+# CORS
+# =========================================================
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # =========================================================
 # PATHS
@@ -28,7 +39,6 @@ app = FastAPI(
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 INDEX_FILE = STATIC_DIR / "index.html"
-
 
 # =========================================================
 # LIVEKIT
@@ -47,30 +57,24 @@ if not LIVEKIT_API_KEY:
 if not LIVEKIT_API_SECRET:
     raise RuntimeError("LIVEKIT_API_SECRET is missing")
 
-
 # =========================================================
 # SETTINGS
 # =========================================================
 
 ROOM_NAME = "mt-rp"
 
-# إذا لم يصل تحديث من اللاعب خلال هذه المدة يعتبر خارج الماب
 PLAYER_TIMEOUT = 10
 
-# الكود صالح 10 دقائق
 CODE_EXPIRE_SECONDS = 600
 
-# أقصى محاولات للكود
 MAX_CODE_ATTEMPTS = 5
 
 # =========================================================
 # PROXIMITY SETTINGS
 # =========================================================
 
-# هذه القيم تستخدمها صفحة الموقع لحساب الصوت
 VOICE_MAX_DISTANCE = 80.0
 VOICE_FULL_VOLUME_DISTANCE = 5.0
-
 
 # =========================================================
 # MEMORY
@@ -79,7 +83,6 @@ VOICE_FULL_VOLUME_DISTANCE = 5.0
 players = {}
 verification_codes = {}
 verified_sessions = {}
-
 
 # =========================================================
 # MODELS
@@ -130,7 +133,7 @@ async def health():
     return {
         "status": "online",
         "service": "MT Voice",
-        "version": "3.0.0"
+        "version": "3.0.1"
     }
 
 
@@ -166,7 +169,7 @@ async def get_players():
 
     expired_players = []
 
-    for user_id, data in players.items():
+    for user_id, data in list(players.items()):
 
         if current_time - data["updated"] <= PLAYER_TIMEOUT:
 
@@ -180,13 +183,14 @@ async def get_players():
 
             expired_players.append(user_id)
 
-    # تنظيف اللاعبين الخارجين
     for user_id in expired_players:
 
         players.pop(user_id, None)
 
-        # إذا خرج اللاعب من الماب ينتهي تحقق جلسته
-        verified_sessions.pop(user_id, None)
+        verified_sessions.pop(
+            user_id,
+            None
+        )
 
     return active_players
 
@@ -211,14 +215,32 @@ async def get_roblox_user(username: str):
 
     try:
 
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(
+                connect=10,
+                read=15,
+                write=15,
+                pool=10
+            ),
+            follow_redirects=True
+        ) as client:
 
             response = await client.post(
                 url,
-                json=payload
+                json=payload,
+                headers={
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                    "User-Agent": "MT-Voice/3.0"
+                }
             )
 
             if response.status_code != 200:
+                print(
+                    "Roblox API Error:",
+                    response.status_code,
+                    response.text[:500]
+                )
                 return None
 
             data = response.json()
@@ -239,7 +261,30 @@ async def get_roblox_user(username: str):
                 )
             }
 
-    except Exception:
+    except httpx.TimeoutException as error:
+
+        print(
+            "Roblox API Timeout:",
+            repr(error)
+        )
+
+        return None
+
+    except httpx.HTTPError as error:
+
+        print(
+            "Roblox HTTP Error:",
+            repr(error)
+        )
+
+        return None
+
+    except Exception as error:
+
+        print(
+            "Roblox API Exception:",
+            repr(error)
+        )
 
         return None
 
@@ -259,9 +304,11 @@ def generate_code():
             for _ in range(8)
         )
 
+        current_time = time.time()
+
         used = any(
             item["code"] == code
-            and time.time() - item["created"]
+            and current_time - item["created"]
             <= CODE_EXPIRE_SECONDS
             for item in verification_codes.values()
         )
@@ -281,7 +328,9 @@ def cleanup_verifications():
 
     expired_users = []
 
-    for user_id, data in verification_codes.items():
+    for user_id, data in list(
+        verification_codes.items()
+    ):
 
         if (
             current_time - data["created"]
@@ -309,18 +358,35 @@ async def request_verification(
 
     cleanup_verifications()
 
+    username = request.username.strip()
+
+    if not username:
+
+        raise HTTPException(
+            status_code=400,
+            detail="اكتب اسم Roblox أولاً"
+        )
+
+    print(
+        f"Verification request received: {username}"
+    )
+
     user = await get_roblox_user(
-        request.username
+        username
     )
 
     if not user:
 
         raise HTTPException(
             status_code=404,
-            detail="حساب Roblox غير موجود"
+            detail="حساب Roblox غير موجود أو تعذر الوصول إلى Roblox حالياً"
         )
 
     user_id = str(user["id"])
+
+    print(
+        f"Roblox user found: {user['name']} ({user_id})"
+    )
 
     player = players.get(user_id)
 
@@ -328,7 +394,10 @@ async def request_verification(
 
         raise HTTPException(
             status_code=403,
-            detail="تعذر التحقق، هذا الحساب غير موجود حالياً داخل الماب"
+            detail=(
+                "تم العثور على الحساب، لكن لم يصل السيرفر "
+                "تحديث لهذا اللاعب من الماب. تأكد أنك داخل الماب."
+            )
         )
 
     if (
@@ -341,23 +410,31 @@ async def request_verification(
             None
         )
 
+        verified_sessions.pop(
+            user_id,
+            None
+        )
+
         raise HTTPException(
             status_code=403,
-            detail="تعذر التحقق، هذا الحساب غير موجود حالياً داخل الماب"
+            detail=(
+                "تم العثور على الحساب، لكن اللاعب لم يعد "
+                "نشطاً داخل الماب."
+            )
         )
 
     code = generate_code()
 
     verification_codes[user_id] = {
-
         "code": code,
-
         "created": time.time(),
-
         "attempts": 0,
-
         "username": user["name"]
     }
+
+    print(
+        f"Verification code created for {user['name']}"
+    )
 
     return {
 
@@ -526,9 +603,7 @@ async def verify_code(
     )
 
     verified_sessions[user_id] = {
-
         "verified": True,
-
         "created": time.time()
     }
 
@@ -659,15 +734,24 @@ async def startup():
 
     print("====================================")
     print("MT Voice Server Started")
-    print("Version: 3.0.0")
+    print("Version: 3.0.1")
     print("Verification: Enabled")
     print("Code Length: 8")
     print("Code Expiry: 10 Minutes")
     print("Voice Proximity: Enabled")
-    print("Voice Max Distance:", VOICE_MAX_DISTANCE)
+    print(
+        "Voice Max Distance:",
+        VOICE_MAX_DISTANCE
+    )
     print(
         "Voice Full Volume Distance:",
         VOICE_FULL_VOLUME_DISTANCE
     )
-    print("LiveKit Room:", ROOM_NAME)
+    print(
+        "LiveKit Room:",
+        ROOM_NAME
+    )
+    print(
+        "CORS: Enabled"
+    )
     print("====================================")
